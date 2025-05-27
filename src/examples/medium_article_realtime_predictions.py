@@ -9,8 +9,8 @@ tangible series of steps that I could follow to, in time, develop my own real-ti
 Examples:
     Select a single company and use the preset pipeline in `PredictStockPrice.run()` to generate the output figure::
 
-        >>> ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
-        >>> results = ps.run(seq_length=50)
+        $ ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
+        $ results = ps.run(seq_length=50)
 
 Notes:
     Project
@@ -49,7 +49,7 @@ import yfinance as yf
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import Input, Dense, Dropout, LSTM
 
 # Local application imports
 
@@ -181,17 +181,34 @@ class PredictStockPrice:
         Return:
             Sequential: A compiled, trained LSTM model ready to make predictions.
         """
-        model = Sequential()
 
-        # Add LSTM layers
-        model.add(LSTM(units=100, return_sequences=True, input_shape=(self._prepared_data.x_train.shape[1], 1)))
-        model.add(Dropout(0.2))
+        timesteps = self._prepared_data.x_train.shape[1]
 
-        model.add(LSTM(units=100, return_sequences=False))
-        model.add(Dropout(0.2))
+        model = Sequential([
+            # Declare the input shape here, not inside LSTM, for newer versions of Keras
+            Input(shape=(timesteps, 1)),
+            # Add LSTM layers
+            LSTM(100, return_sequences=True),
+            Dropout(0.2),
+            LSTM(100, return_sequences=False),
+            Dropout(0.2),
+            # Add output layer
+            Dense(1),
+        ])
 
-        # Add output layer
-        model.add(Dense(units=1))
+        # Original code for help when reading article
+        #
+        # model = Sequential()
+        #
+        # # Add LSTM layers
+        # model.add(LSTM(units=100, return_sequences=True, input_shape=(self._prepared_data.x_train.shape[1], 1)))
+        # model.add(Dropout(0.2))
+        #
+        # model.add(LSTM(units=100, return_sequences=False))
+        # model.add(Dropout(0.2))
+        #
+        # # Add output layer
+        # model.add(Dense(units=1))
 
         # Compile the model
         model.compile(optimizer='adam', loss='mean_squared_error')
