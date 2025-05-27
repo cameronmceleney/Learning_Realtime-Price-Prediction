@@ -14,9 +14,9 @@ Examples:
 
 Notes:
     Project
-        Learning_Realtime-Price-Prediction_toolkit
+        Learning_Realtime_PricePrediction_toolkit
     Path
-        src/examples/medium_realtime-predictions.py
+        src/examples/medium_article_realtime_predictions.py
     IDE
         PyCharm
     Version
