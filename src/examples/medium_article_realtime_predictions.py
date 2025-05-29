@@ -2,39 +2,44 @@
 # -*- coding: utf-8 -*-
 """A detailed worked example of a real-time stock price prediction system using LSTM.
 
-This is almost entirely based upon the original article written by `Abhishek Shaw and can be found on Medium`_.
+This file is based upon the original article written by `Abhishek Shaw and can be found on Medium`_.
 It was this article that originally inspired me to begin the development of this entire project. The article offered a
 tangible series of steps that I could follow to, in time, develop my own real-time stock market price prediction system.
 
 Examples:
     Select a single company and use the preset pipeline in `PredictStockPrice.run()` to generate the output figure::
 
-        $ ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
-        $ results = ps.run(seq_length=50)
+        >>> from src.examples.medium_article_realtime_predictions import PredictStockPrice
+        >>> example_ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
+        >>> example_results = example_ps.run(seq_length=50)
+
+Attributes:
+    Preprocessed (namedtuple): Holds preprocessed data for LSTM model training under human-readable field names.
+    PreparedData (namedtuple): Groups prepared training and testing data for LSTM model training.
+
+References:
+    Article author
+        Abhishek Shaw
+
+    Article created on
+        10 Nov 2024
 
 Notes:
+    Version
+        0.2.0
     Project
         Learning_Realtime_PricePrediction_toolkit
     Path
         src/examples/medium_article_realtime_predictions.py
+    File created by
+        Cameron Aidan McEleney <c.mceleney.1@research.gla.ac.uk>
+    File created on
+        25 May 2025
     IDE
         PyCharm
-    Version
-        0.1.0
-
-References:
-    Author
-        Abhishek Shaw
-    Created
-        10 Nov 2024
-
-    Edited by
-        Cameron Aidan McEleney <c.mceleney.1@research.gla.ac.uk>
-
 
 .. _Abhishek Shaw and can be found on Medium:
     https://medium.com/@abhishekshaw020/python-project-building-a-real-time-stock-market-price-prediction-system-6ce626907342
-
 """
 
 # Whole library imports
@@ -53,6 +58,14 @@ from tensorflow.keras.layers import Input, Dense, Dropout, LSTM
 
 # Local application imports
 
+
+# Module level variables
+Preprocessed = namedtuple("Preprocessed", ["scaler", "training_data", "testing_data"])
+"""(namedtuple): Holds preprocessed data for LSTM model training under human-readable field names."""
+
+PreparedData = namedtuple("PreparedData", ["x_train", "y_train", "x_test", "y_test"])
+"""(namedtuple): Groups prepared training and testing data for LSTM model training."""
+
 __all__ = ["PredictStockPrice"]
 
 
@@ -67,8 +80,6 @@ class PredictStockPrice:
         start_date: Start date for fetching historical stock data.
         end_date: End date for fetching historical stock data.
     """
-    _Preprocessed = namedtuple("Preprocessed", ["scaler", "training_data", "testing_data"])
-    _PreparedData = namedtuple("PreparedData", ["x_train", "y_train", "x_test", "y_test"])
 
     def __init__(self, ticker_symbol='TSLA', start_date='2016-10-01', end_date='2024-10-01'):
         """Docstring explainer.
@@ -99,7 +110,7 @@ class PredictStockPrice:
         return yf.download(self.ticker_symbol, start=self.start_date, end=self.end_date)
 
     @property
-    def _preprocessing(self) -> _Preprocessed:
+    def _preprocessing(self) -> Preprocessed:
         """Normalise and split the stock data into training and testing sets for LSTM model training.
 
         Returns:
@@ -122,7 +133,7 @@ class PredictStockPrice:
         # Split the data into training (80%) and testing (20%) sets
         train_size = int(len(scaled_data) * 0.8)
 
-        return self._Preprocessed(
+        return self.Preprocessed(
             scaler=scaler,
             training_data=scaled_data[:train_size],
             testing_data=scaled_data[train_size:]
@@ -133,13 +144,13 @@ class PredictStockPrice:
         """The scaler used for normalising the stock data."""
         return self._preprocessing.scaler
 
-    def data_preparation(self, seq_length: int = 60) -> _PreparedData:
+    def data_preparation(self, seq_length: int = 60) -> PreparedData:
         """Create sequences from the training and test data.
 
         Args:
             seq_length (int): Number of previous days to consider for prediction. Defaults to 60.
         Returns:
-            _PreparedData: namedtuple containing the training and testing sequences.
+            PreparedData: namedtuple containing the training and testing sequences.
         """
         def create_sequences(data, seq_len) -> tuple[np.ndarray, np.ndarray]:
             """Helper function to create sequences from the data.
@@ -162,7 +173,7 @@ class PredictStockPrice:
         x_test, y_test = create_sequences(self._preprocessing.testing_data, seq_length)
 
         # Reshape the input data to be compatible with LSTM
-        return self._PreparedData(
+        return self.PreparedData(
             x_train=np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1)),
             y_train=y_train,
             x_test=np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1)),
@@ -319,3 +330,4 @@ class PredictStockPrice:
 if __name__ == "__main__":
     ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
     results = ps.run(seq_length=50)
+
