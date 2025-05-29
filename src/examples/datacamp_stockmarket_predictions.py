@@ -67,7 +67,7 @@ MODULE_LEVEL_CONSTANT1: int = 1
 """A module-level constant with in-line docstring."""
 
 
-def my_func() -> Any | None:
+def my_func() -> None:
     """(One-line summary of function.)"""
     # Do stuff
     pass
