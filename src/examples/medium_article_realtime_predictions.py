@@ -11,10 +11,12 @@ Examples:
 
         >>> from src.examples.medium_article_realtime_predictions import PredictStockPrice
         >>> example_ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
-        >>> example_results = example_ps.run(seq_length=50)
+        >>> example_ps.run(seq_length=50)
 
-Attributes:
-    PREPROCESSED_DATA (namedtuple): Holds PREPROCESSED_DATA data for LSTM model training under human-readable field names.
+Constants:
+    PREPROCESSED_DATA (namedtuple): Holds PREPROCESSED_DATA data for LSTM model training under human-readable field
+    names.
+
     PREPARED_DATA (namedtuple): Groups prepared training and testing data for LSTM model training.
 
 References:
@@ -44,30 +46,34 @@ Notes:
 
 __all__ = ["PredictStockPrice"]
 
-# Whole library imports
+# Standard library imports
 from array import array
 from collections import namedtuple
 from functools import cached_property
-import numpy as np
-from pandas import DataFrame
-import plotly.graph_objs as go
-from typing import Any
-import yfinance as yf
 
-# ML package imports
+# Third-party imports
+import numpy as np
+import plotly.graph_objs as go
+import yfinance as yf
+from pandas import DataFrame
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.layers import Dense, Dropout, Input, LSTM
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Input, Dense, Dropout, LSTM
 
 # Local application imports
 
-
-# Module level variables
-PREPROCESSED_DATA = namedtuple("PREPROCESSED_DATA", ["scaler", "training_data", "testing_data"])
+# Module-level constants
+PREPROCESSED_DATA = namedtuple(
+    "PREPROCESSED_DATA",
+    ["scaler", "training_data", "testing_data"],
+)
 """(namedtuple): Groups preprocessed data for LSTM model training under human-readable field names."""
 
-PREPARED_DATA = namedtuple("PREPARED_DATA", ["x_train", "y_train", "x_test", "y_test"])
+PREPARED_DATA = namedtuple(
+    "PREPARED_DATA",
+    ["x_train", "y_train", "x_test", "y_test"],
+)
 """(namedtuple): Groups prepared training and testing data for LSTM model training."""
 
 

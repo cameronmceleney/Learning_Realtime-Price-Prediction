@@ -11,14 +11,14 @@ rather a more complex example that builds upon the concepts introduced in the tu
 This file is intended to be used as a reference for me in the future, and to provide a more comprehensive understanding
 of LSTM networks in the context of stock market predictions.
 
+Constants:
+    MODULE_LEVEL_CONSTANT1 (int): A module-level constant.
+
 Examples:
     (Any example implementations for this file)::
         
-        >>> bar = 1
-        >>> foo = bar + 1
-
-Attributes:
-    MODULE_LEVEL_VARIABLE1 (int): A module level variable.
+        $ bar = 1
+        $ foo = bar + 1
 
 Todo:
     * Work through referenced (url) tutorial and implement the code in this file.
@@ -53,34 +53,24 @@ Notes:
 
 __all__ = [""]
 
-# --- Import packages/modules here ---
-# Common
-import matplotlib.pyplot as plt
-import numpy as np
+# Standard library imports
 from typing import Any
 
-# Uncommon
+# Third-party imports
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Local application imports
+
+# Module-level constants
+MODULE_LEVEL_CONSTANT1: int = 1
+"""A module-level constant with in-line docstring."""
 
 
-# Local project files
-
-
-# Module level variables
-MODULE_LEVEL_VARIABLE1: int = 1
-"""A module level variable."""
-
-
-def my_func() -> Any:
-    """One-line summary of function.
-    
-    Args:
-        
-    
-    Returns:
-        
-    """
-
-    return
+def my_func() -> Any | None:
+    """(One-line summary of function.)"""
+    # Do stuff
+    pass
 
 
 if __name__ == "__main__":
