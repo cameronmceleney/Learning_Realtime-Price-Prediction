@@ -14,8 +14,8 @@ Examples:
         >>> example_results = example_ps.run(seq_length=50)
 
 Attributes:
-    Preprocessed (namedtuple): Holds preprocessed data for LSTM model training under human-readable field names.
-    PreparedData (namedtuple): Groups prepared training and testing data for LSTM model training.
+    PREPROCESSED_DATA (namedtuple): Holds PREPROCESSED_DATA data for LSTM model training under human-readable field names.
+    PREPARED_DATA (namedtuple): Groups prepared training and testing data for LSTM model training.
 
 References:
     Article author
@@ -42,12 +42,16 @@ Notes:
     https://medium.com/@abhishekshaw020/python-project-building-a-real-time-stock-market-price-prediction-system-6ce626907342
 """
 
+__all__ = ["PredictStockPrice"]
+
 # Whole library imports
+from array import array
 from collections import namedtuple
 from functools import cached_property
 import numpy as np
 from pandas import DataFrame
 import plotly.graph_objs as go
+from typing import Any
 import yfinance as yf
 
 # ML package imports
@@ -60,13 +64,11 @@ from tensorflow.keras.layers import Input, Dense, Dropout, LSTM
 
 
 # Module level variables
-Preprocessed = namedtuple("Preprocessed", ["scaler", "training_data", "testing_data"])
-"""(namedtuple): Holds preprocessed data for LSTM model training under human-readable field names."""
+PREPROCESSED_DATA = namedtuple("PREPROCESSED_DATA", ["scaler", "training_data", "testing_data"])
+"""(namedtuple): Groups preprocessed data for LSTM model training under human-readable field names."""
 
-PreparedData = namedtuple("PreparedData", ["x_train", "y_train", "x_test", "y_test"])
+PREPARED_DATA = namedtuple("PREPARED_DATA", ["x_train", "y_train", "x_test", "y_test"])
 """(namedtuple): Groups prepared training and testing data for LSTM model training."""
-
-__all__ = ["PredictStockPrice"]
 
 
 class PredictStockPrice:
@@ -77,19 +79,19 @@ class PredictStockPrice:
 
     Attributes:
         ticker_symbol:  Four-letter stock ticker symbol of the company for which we are retrieving data.
-        start_date: Start date for fetching historical stock data.
-        end_date: End date for fetching historical stock data.
+        start_date: Start date for fetching historical stock data in 'YYYY-MM-DD' format.
+        end_date: End date for fetching historical stock data in 'YYYY-MM-DD' format.
     """
 
-    def __init__(self, ticker_symbol='TSLA', start_date='2016-10-01', end_date='2024-10-01'):
-        """Docstring explainer.
+    def __init__(self, ticker_symbol: str = 'TSLA', start_date: str = '2016-10-01', end_date: str = '2024-10-01'):
+        """Initialise the PredictStockPrice instance.
 
         Args:
-            ticker_symbol(str): Defines the company for this instance.
-            start_date (str): Start date in 'YYYY-MM-DD' format.
-            end_date (str): End date in 'YYYY-MM-DD' format.
-
+            ticker_symbol: Defines the company for this instance. Defaults to 'TSLA' (Tesla Inc.).
+            start_date: Initial (oldest) date in recording period. Defaults to '2016-10-01'.
+            end_date: Final (most recent) date in recording period. Defaults to '2024-10-01'.
         """
+
         # Core configuration
         self.ticker_symbol = ticker_symbol
         self.start_date = start_date
@@ -103,14 +105,17 @@ class PredictStockPrice:
     def fetch_stock_data(self) -> DataFrame | None:
         """Fetch company's historical stock data.
 
+        This method uses the yfinance library to download historical stock data for the ticker symbol and date-range
+        specified in the class instance.
+
         Return:
-            DataFrame | None: A pandas DataFrame containing the historical stock data for the specified
-            ticker symbol.
+            If successful, return a pandas DataFrame of the historical stock data for the specified company
+            ticker symbol, otherwise return None.
         """
         return yf.download(self.ticker_symbol, start=self.start_date, end=self.end_date)
 
     @property
-    def _preprocessing(self) -> Preprocessed:
+    def _preprocessing(self) -> PREPROCESSED_DATA:
         """Normalise and split the stock data into training and testing sets for LSTM model training.
 
         Returns:
@@ -120,6 +125,7 @@ class PredictStockPrice:
             - ``training_data`` (np.ndarray): Normalised training data.
             - ``testing_data`` (np.ndarray): Normalised testing data.
         """
+
         df = self.fetch_stock_data
         if df.empty:
             raise ValueError("No data fetched. Please check the ticker symbol and date range.")
@@ -133,31 +139,32 @@ class PredictStockPrice:
         # Split the data into training (80%) and testing (20%) sets
         train_size = int(len(scaled_data) * 0.8)
 
-        return self.Preprocessed(
+        return PREPROCESSED_DATA(
             scaler=scaler,
             training_data=scaled_data[:train_size],
-            testing_data=scaled_data[train_size:]
-        )
+            testing_data=scaled_data[train_size:])
 
     @cached_property
-    def _scaler(self):
+    def _scaler(self) -> MinMaxScaler:
         """The scaler used for normalising the stock data."""
         return self._preprocessing.scaler
 
-    def data_preparation(self, seq_length: int = 60) -> PreparedData:
+    def data_preparation(self, seq_length: int = 60) -> PREPARED_DATA:
         """Create sequences from the training and test data.
 
         Args:
-            seq_length (int): Number of previous days to consider for prediction. Defaults to 60.
+            seq_length: Number of previous days to consider for prediction. Defaults to 60.
+
         Returns:
-            PreparedData: namedtuple containing the training and testing sequences.
+            PREPARED_DATA: namedtuple containing the training and testing sequences.
         """
-        def create_sequences(data, seq_len) -> tuple[np.ndarray, np.ndarray]:
+
+        def create_sequences(data: np.ndarray, seq_len: int) -> tuple[np.ndarray, np.ndarray]:
             """Helper function to create sequences from the data.
 
             Args:
-                data (np.ndarray): The data to create sequences from.
-                seq_len (int): The number of previous days to consider for prediction.
+                data: Data to create sequences from.
+                seq_len: Number of previous days to consider for prediction.
 
             Returns:
                 tuple[np.ndarray, np.ndarray]: Tuple containing the input sequences and ... .
@@ -173,21 +180,20 @@ class PredictStockPrice:
         x_test, y_test = create_sequences(self._preprocessing.testing_data, seq_length)
 
         # Reshape the input data to be compatible with LSTM
-        return self.PreparedData(
+        return PREPARED_DATA(
             x_train=np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1)),
             y_train=y_train,
             x_test=np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1)),
-            y_test=y_test,
-        )
+            y_test=y_test)
 
-    def build_model(self, epochs=20, batch_size=32) -> Sequential:
+    def build_model(self, epochs: int = 20, batch_size: int = 32) -> Sequential:
         """Initialise the model.
 
         Can be expensive to run, but don't cache to avoid clogging memory; we're only interested in the predictions.
 
         Args:
-            epochs (int): Number of epochs to train the model. Defaults to 20.
-            batch_size (int): Size of the batches used in training. Defaults to 32.
+            epochs: Number of epochs to train the model. Defaults to 20.
+            batch_size: Size of the batches used in training. Defaults to 32.
 
         Return:
             Sequential: A compiled, trained LSTM model ready to make predictions.
@@ -207,19 +213,21 @@ class PredictStockPrice:
             Dense(1),
         ])
 
-        # Original code for help when reading article
-        #
-        # model = Sequential()
-        #
-        # # Add LSTM layers
-        # model.add(LSTM(units=100, return_sequences=True, input_shape=(self._prepared_data.x_train.shape[1], 1)))
-        # model.add(Dropout(0.2))
-        #
-        # model.add(LSTM(units=100, return_sequences=False))
-        # model.add(Dropout(0.2))
-        #
-        # # Add output layer
-        # model.add(Dense(units=1))
+        # Block comment - original code from article.
+        """Original code from article. Left to help readers match article code to this code.
+        
+        model = Sequential()
+        
+        # Add LSTM layers
+        model.add(LSTM(units=100, return_sequences=True, input_shape=(self._prepared_data.x_train.shape[1], 1)))
+        model.add(Dropout(0.2))
+        
+        model.add(LSTM(units=100, return_sequences=False))
+        model.add(Dropout(0.2))
+        
+        # Add output layer
+        model.add(Dense(units=1))
+        """
 
         # Compile the model
         model.compile(optimizer='adam', loss='mean_squared_error')
@@ -250,39 +258,47 @@ class PredictStockPrice:
 
         return predictions, y_test_scaled
 
-    def retrain(self, *args, **kwargs):
+    def retrain(self, *args, **kwargs) -> None:
+        """Helper method that clears cached properties; allowing the model to be retrained with new parameters.
+
+        Args:
+            *args: Variable length argument list for the model training parameters.
+            **kwargs: Arbitrary keyword arguments for the model training parameters.
+        """
         self.build_model(*args, **kwargs)
         for prop in ('predictions', 'actual_prices'):
             self.__dict__.pop(prop, None)
 
     @cached_property
-    def predictions(self):
+    def predictions(self) -> np.ndarray:
         """Predictions made by the model.
 
-        Cache to enable inexpensive repeated access during data visualisation.
+        Cached to enable inexpensive repeated access during data visualisation.
 
         Return:
-            np.ndarray: The predicted stock prices.
+            The predicted stock prices.
         """
         return self.make_predictions()[0]
 
     @cached_property
-    def actual_prices(self):
+    def actual_prices(self) -> np.ndarray:
         """The actual test prices; scaled back to the original price scale.
 
-        Cache to enable inexpensive repeated access during data visualisation.
+        Cached to enable inexpensive repeated access during data visualisation.
 
         Return:
-            np.ndarray: The actual stock prices from the test dataset.
+            The actual stock prices from the test dataset.
         """
         return self.make_predictions()[1]
 
-    def visualise_results(self):
-        """Create a figure.
+    def visualise_results(self) -> None:
+        """Generate a figure of the predicted stock price versus the actual stock price.
 
-        Visualises the actual stock prices and the predicted stock prices using Plotly.
+        This method uses Plotly to create an interactive line chart that displays the actual stock prices.
+
+        Returns:
+            Automatically displays the figure in a web browser or inline in a Jupyter notebook.
         """
-
         fig = go.Figure()
 
         # Add trace for actual prices
@@ -306,8 +322,16 @@ class PredictStockPrice:
         # Show the figure
         fig.show()
 
-    def model_evaluation(self):
-        """Calculate MSE and RMSE."""
+    def model_evaluation(self) -> dict[str, float | array | np.ndarray]:
+        """Evaluate model's performance by calculating the Mean Square Error (MSE) and Root Mean Square Error (RMSE).
+
+        Calculations of the MSE and RMSE are based on comparing the predictions made by the model to the actual prices.
+        These datasets are stored in the class instance's attributes as `self.predictions` and `self.actual_prices`,
+        respectively.
+
+        Returns:
+            Dictionary containing the MSE and RMSE of the predictions compared to the actual prices.
+        """
 
         mse = mean_squared_error(self.actual_prices, self.predictions)
         rmse = np.sqrt(mse)
@@ -318,16 +342,31 @@ class PredictStockPrice:
         return {'mse': mse, 'rmse': rmse}
 
     # --- Pipeline methods ---
-    def run(self, seq_length=60, epochs=20, batch_size=32):
-        """Full pipeline in one call."""
+    def run(self, seq_length: int = 60, epochs: int = 20, batch_size: int = 32) -> None:
+        """Automatically run the entire pipeline.
+
+        Stages
+            1. Fetch company's stock data.
+            2. Prepare the data.
+            3. Build and train the ML model.
+            4. Make predictions using the trained model.
+            5. Visualise results.
+            6. Evaluate the model's performance.
+
+        Args:
+            seq_length: Number of previous days to consider for prediction. Defaults to 60.
+            epochs: Number of epochs to train the model. Defaults to 20.
+            batch_size: Size of the batches used in training. Defaults to 32.
+
+        """
+
         self._prepared_data = self.data_preparation(seq_length)
         self.build_model(epochs, batch_size)
         self.make_predictions()
         self.visualise_results()
-        return self.model_evaluation()
+        self.model_evaluation()
 
 
 if __name__ == "__main__":
     ps = PredictStockPrice("TSLA", "2020-01-01", "2025-01-01")
-    results = ps.run(seq_length=50)
-
+    ps.run(seq_length=50)

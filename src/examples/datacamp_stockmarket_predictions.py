@@ -51,6 +51,8 @@ Notes:
     https://www.datacamp.com/tutorial/lstm-python-stock-market
 """
 
+__all__ = [""]
+
 # --- Import packages/modules here ---
 # Common
 import matplotlib.pyplot as plt
@@ -66,8 +68,6 @@ from typing import Any
 # Module level variables
 MODULE_LEVEL_VARIABLE1: int = 1
 """A module level variable."""
-
-__all__ = [""]
 
 
 def my_func() -> Any:
