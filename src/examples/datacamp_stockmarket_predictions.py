@@ -506,7 +506,7 @@ class PredictStockMarket:
 
             fig.update_yaxes(
                 range=[0, df_plot['Price'].max() * 1.02],
-                showgrid=True,
+                showgrid=False,
                 gridcolor="LightGray",
                 gridwidth=0.75,
                 zeroline=True,
