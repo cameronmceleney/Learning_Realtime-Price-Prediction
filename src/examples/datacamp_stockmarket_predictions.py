@@ -592,6 +592,18 @@ class PredictUsingLSTM(PredictStockMarket):
         self._segments: Union[None, int] = None  # number of “segments” = floor((_prices_length)/(batch_size))
         self._cursor: Union[None, NDArray] = None  # one cursor position per batch‐slot
 
+        self._hyperparameters = {
+            'dimensionality': 1,  # Dimensionality of data; often `1` for 1D.
+            'num_unrollings': 50,  # Number of timesteps model looks into future.
+            'batch_size': 500,  # Samples per batch. Ensure no conflicts with `self._batch_size`.
+            'num_nodes': [200, 200, 150],  # Hidden nodes per layer of deep LSTM stack.
+            'n_layers': None,
+            'dropout': 0.2  # Dropout amount.
+        }
+        self._hyperparameters['n_layers'] = len(self._hyperparameters['num_nodes'])
+
+        self.train_inputs, self.train_outputs = [], []
+
     def initialise(self, batch_size: int, num_unroll: int, prices: Optional[NDArray] = None) -> None:
         """
         Prepare all internal indices for batch/unroll splitting.
@@ -624,6 +636,27 @@ class PredictUsingLSTM(PredictStockMarket):
             )
 
         self._cursor = [offset * self._segments for offset in range(self._batch_size)]
+
+        # Defining inputs and outputs
+        for i in range(self._hyperparameters['num_unrollings']):
+            self.train_inputs.append(tf.placeholder(tf.float32,
+                                                    shape=[self._hyperparameters['batch_size'],
+                                                           self._hyperparameters['dimensionality']],
+                                                    name=f'train_inputs_{i}'))
+            self.train_outputs.append(tf.placeholder(tf.float32,
+                                                     shape=[self._hyperparameters['batch_size'], 1],
+                                                     name=f'train_outputs_{i}'))
+
+        # Defining parameters of the LSTM and regression layer
+        lstm_cells = []
+        for L in range(self._hyperparameters['n_layers']):
+            lstm_cells.append(tf.contrib.rnn.LSTMCell(
+                num_units=self._hyperparameters['n_layers'][L],
+                state_is_tuple=True,
+                initializer=tf.contrib.layers.xavier_initializer(),
+            ))
+
+
 
     def next_batch(self) -> tuple[NDArray, ...]:
         """Return a single batch of size ``batch_size`` per cursor.
