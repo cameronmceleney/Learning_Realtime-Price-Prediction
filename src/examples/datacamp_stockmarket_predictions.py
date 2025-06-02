@@ -276,7 +276,11 @@ class PredictStockMarket:
 
         return self._data_all
 
-    def predict_by_averaging(self, mechanism='standard', window_size: int = 100) -> None | tuple:
+    def predict_by_averaging(
+            self,
+            mechanism='standard',
+            window_size: int = 100
+    ) -> tuple[np.ndarray, ...] | None:
         """Generate predictions for future stock prices.
 
         Averaging mechanisms allow you to predict (often a one-time step ahead) by representing the future stock price
@@ -321,6 +325,7 @@ class PredictStockMarket:
             logging.warning(f"Provided unsupported/unknown mechanism: {mechanism}")
             return None
         else:
+            self._mechanism = found_mech
             self._plot_info['Mechanism'] = found_mech + ' ' + 'average'
 
         self._window_size = window_size
@@ -405,12 +410,9 @@ class PredictStockMarket:
             self,
             std_avg_predictions: np.ndarray,
             std_avg_predictions_errors: Optional[np.ndarray] = None,
-            original_data: Optional[np.ndarray] = None,
             window_size: Optional[int] = None,
             style: str = 'mpl'
     ) -> None:
-
-        if original_data is None: original_data = self._data_all
 
         rmse = np.sqrt(std_avg_predictions_errors) if std_avg_predictions_errors else None
 
@@ -430,51 +432,48 @@ class PredictStockMarket:
                 raise ValueError("No window size specified.")
 
         if style == 'mpl':
-            N = original_data.size
 
             fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
 
-            ax.plot(range(N), original_data, color='blue',
+            ax.plot(range(self._data_all.size), self._data_all, color='blue',
                     label='Source')
 
-            xlim_lower = window_size if self._plot_info['Mechanism'] == 'Standard' else 0
-            ax.plot(range(xlim_lower, N), std_avg_predictions, color='orange',
+            xlim_lower = window_size if self._mechanism == 'Standard' else 0
+            ax.plot(range(xlim_lower, self._data_all.size), std_avg_predictions, color='orange',
                     label='Predicted')
 
-            ax.set(title=f"Stock Market Predictions | {self.ticker_symbol} | {self._plot_info.get('Mechanism')}",
+            ax.set(title=f"Stock Market Predictions | {self.ticker_symbol} | {self._plot_info['Mechanism']}",
                    xlabel="Date", ylabel="Mid Price")
 
-            ax.legend(title='Price')
+            ax.legend(title='Price data')
             plt.show()
 
         elif style == 'plotly':
-            N = len(original_data)
+            N = self._data_all.size
 
-            # Easier: split into two DataFrames, then concat with a “Type” column:
             df_true = pd.DataFrame({
-                # "Index": list(range(N)),
                 'Date': self._dataframe['Date'],
-                'Price': original_data,
+                'Price': self._data_all,
                 'Type': "Source",
             })
 
-            preds_start = window_size if self._plot_info['Mechanism'] == 'Standard' else 0
+            preds_start = window_size if self._mechanism == 'Standard' else 0
             df_pred = pd.DataFrame({
-                # "Index": list(range(preds_start, N)),
-                'Date': self._dataframe['Date'].iloc[preds_start:N].reset_index(drop=True),
+                'Date': self._dataframe['Date'].iloc[preds_start:self._data_all.size].reset_index(drop=True),
                 'Price': std_avg_predictions,
                 'Type': 'Predicted',
-                'Error': rmse,
+                'Error': (rmse
+                          if std_avg_predictions_errors is not None
+                          else None)
             })
 
             df_plot = pd.concat([df_true, df_pred], ignore_index=True)
-            df_plot["Date"] = pd.to_datetime(df_plot["Date"])
+            df_plot["Date"] = pd.to_datetime(df_plot["Date"])  # Ensures correct formatting (datetime64) for `dticks`
 
-            # Now hand off to Plotly Express:
             fig = px.line(
-                df_plot,
-                x="Date", y="Price",
-                color="Type", color_discrete_sequence=px.colors.qualitative.Prism,
+                data_frame=df_plot,
+                x="Date",
+                y="Price",
                 title=f"Stock Market Predictions | "
                       f"{self.ticker_symbol}",
                 subtitle=f'{self._plot_info.get('Mechanism')}',
@@ -484,77 +483,92 @@ class PredictStockMarket:
                     'Price': ':.4f',
                     'Error': False,
                     'Type': False,
-                }
+                },
+                color="Type",
+                color_discrete_sequence=px.colors.qualitative.Prism,
             )
 
-            # Colors and templates
-            fig.update_layout(
-                template='plotly_white',
-                paper_bgcolor='white',
-                plot_bgcolor='white',
-                # margin={"l": 40, "r": 30, "t": 60, "b": 40},
-            )
-
-            fig.update_layout(
-                font=dict(family="Arial, sans‐serif", size=12),
-                title_font=dict(family="Arial, sans‐serif", size=18),
-                legend_font=dict(family="Arial, sans‐serif", size=11),
-            )
-
-            # Axes
-            fig.update_xaxes(showgrid=False, showline=False)
-
-            fig.update_yaxes(
-                range=[0, df_plot['Price'].max() * 1.02],
-                showgrid=False,
-                gridcolor="LightGray",
-                gridwidth=0.75,
-                zeroline=True,
-                zerolinecolor="LightGray",
-                zerolinewidth=0.75,
-            )
-
-            # Extra
-            fig.update_layout(
-                autosize=True,
-                legend=dict(
-                    title=None, orientation="v",
-                    x=0.98, xanchor="right",
-                    y=0.95, yanchor="top",
-                    bgcolor="rgba(0,0,0,0)",
-                ),
-                hovermode="x unified",
-                hoverlabel=dict(
-                    bgcolor="white",
-                    font_size=12,
-                    font_family="Arial, sans‐serif",
-                )
-            )
-
-            # Widgets
-            fig.update_layout(
-                xaxis=dict(
-                    rangeselector=dict(
-                        buttons=list([
-                            dict(count=1, label="1m", step="month", stepmode="backward"),
-                            dict(count=6, label="6m", step="month", stepmode="backward"),
-                            dict(count=1, label="YTD", step="year", stepmode="todate"),
-                            dict(count=1, label="1y", step="year", stepmode="backward"),
-                            dict(count=5, label="5y", step="year", stepmode="backward"),
-                            dict(step="all")
-                        ]),
-                        bgcolor="rgba(230, 230, 230, 0.5)",
-                        activecolor="Gray",
-                        x=0.5, xanchor="center",
-                        y=1.02, yanchor="top",
-                        font=dict(size=12),
-                    ),
-                    rangeslider=dict(visible=True, thickness=0.1),
-                    type="date"
-                )
-            )
+            self._apply_plotly_styling(fig, df_plot)
 
             fig.show()
+
+    @staticmethod
+    def _apply_plotly_styling(fig: px.line, df: pd.DataFrame) -> None:
+        """
+        Private helper to apply final layout tweaks to plotly figures.
+
+        Changes include:
+            colors, fonts, axes style, legend placement, rangeselector buttons, etc.
+
+        This method should not handle the means of saving plots
+        """
+
+        # Colors and templates
+        fig.update_layout(
+            template='plotly_white',
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+        )
+
+        fig.update_layout(
+            font=dict(family="Arial, sans‐serif", size=12),
+            title_font=dict(family="Arial, sans‐serif", size=18),
+            legend_font=dict(family="Arial, sans‐serif", size=11),
+        )
+
+        # Axes
+        fig.update_xaxes(showgrid=False, showline=False)
+
+        fig.update_yaxes(
+            range=[0, df['Price'].max() * 1.02],
+            showgrid=False,
+            gridcolor="LightGray",
+            gridwidth=0.75,
+            zeroline=True,
+            zerolinecolor="LightGray",
+            zerolinewidth=0.75,
+        )
+
+        # Extra
+        fig.update_layout(
+            autosize=True,
+            legend=dict(
+                title="Price data", orientation="v",
+                x=0.98, xanchor="right",
+                y=0.95, yanchor="top",
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=12,
+                font_family="Arial, sans‐serif",
+            )
+        )
+
+        # Widgets
+        fig.update_layout(
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=1, label="1m", step="month", stepmode="backward"),
+                        dict(count=6, label="6m", step="month", stepmode="backward"),
+                        dict(count=1, label="YTD", step="year", stepmode="todate"),
+                        dict(count=1, label="1y", step="year", stepmode="backward"),
+                        dict(count=5, label="5y", step="year", stepmode="backward"),
+                        dict(step="all")
+                    ]),
+                    bgcolor="rgba(230, 230, 230, 0.5)",
+                    activecolor="Gray",
+                    # Widget positioning
+                    x=0.5, xanchor="center",
+                    y=1.05, yanchor="top",
+                    font=dict(size=12),
+                ),
+                rangeslider=dict(visible=True, thickness=0.1),
+                type="date"
+            )
+        )
 
 
 def initial_run() -> None:
@@ -568,9 +582,8 @@ def std_avg_run() -> None:
     ps.download_data(data_source='yfinance')
     ps.prepare_data()
     ps.normalise_data()
-    _, predictions_prices, mse_errors = ps.predict_by_averaging(mechanism='exponential')
-    ps.visualise_averaging_based_predictions(std_avg_predictions=predictions_prices,
-                                             style='plotly')
+    prediction_dates, predictions_prices, mse_errors = ps.predict_by_averaging(mechanism='exp')
+    ps.visualise_averaging_based_predictions(std_avg_predictions=predictions_prices, style='plotly')
 
 
 if __name__ == "__main__":
