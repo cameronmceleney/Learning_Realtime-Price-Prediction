@@ -78,6 +78,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 import yfinance as yf
+from typing_extensions import override
 
 # Local application imports
 
@@ -113,6 +114,7 @@ class PredictStockMarket:
 
         self._split_point: int | None = None
         self._window_size: int | None = None
+        self._mechanism: str | None = None
 
         # Containers
         self._plot_info: dict = {}
@@ -244,7 +246,7 @@ class PredictStockMarket:
 
         # Train the Scaler with training data and smooth data
         # Note: The tutorial uses a smoothing window size of 2500 for 4 iterations, but this is not a hard limit.
-        smoothing_window_size = 1000
+        di, smoothing_window_size = 0, 1000
         for di in range(0, self._data_test.shape[0] % smoothing_window_size, smoothing_window_size):
             # Added 'window' to guard against empty slices
             window = self._data_train[di:di + smoothing_window_size, :]
@@ -280,7 +282,7 @@ class PredictStockMarket:
             self,
             mechanism='standard',
             window_size: int = 100
-    ) -> tuple[np.ndarray, ...] | None:
+    ) -> tuple[NDArray, ...] | None:
         """Generate predictions for future stock prices.
 
         Averaging mechanisms allow you to predict (often a one-time step ahead) by representing the future stock price
@@ -365,7 +367,7 @@ class PredictStockMarket:
 
                 mse_errors.append((preds_prices[-1] - self._data_all[idx]) ** 2)
 
-            logging.info(f"MSE error for standard averaging: {0.5 * np.mean(mse_errors):.5f}")
+            logging.info(f"MSE error for standard averaging: {0.5 * np.mean(mse_errors):.5f}")  # type:ignore
 
         elif mechanism in valid_mechanisms['Exponential moving']:
 
@@ -383,9 +385,11 @@ class PredictStockMarket:
 
                 mse_errors.append((preds_prices[-1] - self._data_all[idx]) ** 2)
 
-            logging.info(f"MSE error for EMA averaging: {0.5 * np.mean(mse_errors):.5f}")
+            logging.info(f"MSE error for EMA averaging: {0.5 * np.mean(mse_errors):.5f}")  # type:ignore
 
-        return preds_dates, preds_prices, mse_errors
+        return (np.array(preds_dates, dtype="datetime64"),
+                np.array(preds_prices, dtype=float),
+                np.array(mse_errors, dtype=float))
 
     def visualise_data(self, df: Optional[pd.DataFrame] = None) -> None:
         """Visualise the stock data.
@@ -468,7 +472,6 @@ class PredictStockMarket:
             })
 
             df_plot = pd.concat([df_true, df_pred], ignore_index=True)
-            df_plot["Date"] = pd.to_datetime(df_plot["Date"])  # Ensures correct formatting (datetime64) for `dticks`
 
             fig = px.line(
                 data_frame=df_plot,
@@ -571,6 +574,124 @@ class PredictStockMarket:
         )
 
 
+class PredictUsingLSTM(PredictStockMarket):
+    """A subclass of `PredictStockMarket` that uses Long Short-Term Memory (LSTM) machine learning to predict a
+    company's stock price."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Training data closing prices
+        self._prices: Union[None, NDArray] = None
+        self._prices_length: Union[None, int] = None
+
+        # Set by self.initialise()
+        self._batch_size: Union[None, int] = None
+        self._num_unroll: Union[None, int] = None
+
+        self._segments: Union[None, int] = None  # number of “segments” = floor((_prices_length)/(batch_size))
+        self._cursor: Union[None, NDArray] = None  # one cursor position per batch‐slot
+
+    def initialise(self, batch_size: int, num_unroll: int, prices: Optional[NDArray] = None) -> None:
+        """
+        Prepare all internal indices for batch/unroll splitting.
+
+        Args:
+            batch_size: number of parallel sequences per batch
+            num_unroll: how many timesteps to unroll per sequence
+            prices: 1D array of training-data prices.
+
+        Raises:
+            ValueError: if prices is None (and parent’s data isn’t loaded), or if batch_size/num_unroll do not fit.
+        """
+        if prices is None:
+            if self._dataframe is None:
+                raise ValueError("Cannot initialise - no prices passed and parent's data (dataframe) is empty.")
+            else:
+                prices = self._data_train
+
+        self._prices = prices
+        self._prices_length = len(prices) - num_unroll
+
+        self._batch_size = batch_size
+        self._num_unroll = num_unroll
+
+        self._segments = self._prices_length // self._batch_size
+        if self._segments < 1:
+            raise ValueError(
+                f"batch_size={batch_size} is too large for prices_length={self._prices_length}. "
+                f"Each segment must have at least one element."
+            )
+
+        self._cursor = [offset * self._segments for offset in range(self._batch_size)]
+
+    def next_batch(self) -> tuple[NDArray, ...]:
+        """Return a single batch of size ``batch_size`` per cursor.
+
+        Returns:
+            ``batch_data`` - 1D array of length `batch_size`, where batch_data[i] = prices[cursor[i]].
+
+            ``batch_labels`` - 1D array of length `batch_size`, where
+            batch_labels[i] = prices[cursor[i] + random_offset].
+
+        """
+
+        if self._prices is None or self._cursor is None:
+            raise RuntimeError("Must call `initialise(...)` before requesting `next_batch()`.")
+
+        batch_data = np.zeros(self._batch_size, dtype=np.float32)
+        batch_labels = np.zeros(self._batch_size, dtype=np.float32)
+
+        for i in range(self._batch_size):
+            if self._cursor[i] + 1 >= self._prices_length:
+                self._cursor[i] = np.random.randint(i * self._segments, (i + 1) * self._segments)
+
+            batch_data[i] = self._prices[self._cursor[i]]
+            batch_labels[i] = self._prices[self._cursor[i] + np.random.randint(0, 5)]
+
+            self._cursor[i] = (self._cursor[i] + 1) % self._prices_length
+
+        return batch_data, batch_labels
+
+    def unroll_batches(self) -> tuple[list[NDArray], ...]:
+        """Produce ``num_unroll`` steps of consecutive batches.
+
+        Returns:
+            ``unroll_data`` - each entry is a 1D array of size ``batch_size``.
+
+            ``unroll_labels`` - corresponding labels at each timestep.
+        """
+
+        unroll_data, unroll_labels = [], []
+
+        for _ in range(self._num_unroll):
+            batch_data, batch_labels = self.next_batch()
+
+            unroll_data.append(batch_data)
+            unroll_labels.append(batch_labels)
+
+        return unroll_data, unroll_labels
+
+    def reset_indices(self):
+        """Choose new random starting indices for all batch slots.
+
+        Each index is drawn uniformly from the ith segment of length ``self._segments``.
+        """
+
+        for b in range(self._batch_size):
+            self._cursor[b] = np.random.randint(0, min((b + 1) * self._segments, self._prices_length - 1))
+
+    def _test_run(self):
+        u_data, u_labels = self.unroll_batches()
+
+        for ui, (dat, lbl) in enumerate(zip(u_data, u_labels)):
+            print('\n\nUnrolled index %d' % ui)
+            dat_ind = dat
+            lbl_ind = lbl
+            print('\tInputs: ', dat)
+            print('\n\tOutput:', lbl)
+
+
 def initial_run() -> None:
     ps = PredictStockMarket(ticker_symbol='AAL')
     ps.download_data(data_source='yfinance')
@@ -586,5 +707,14 @@ def std_avg_run() -> None:
     ps.visualise_averaging_based_predictions(std_avg_predictions=predictions_prices, style='plotly')
 
 
+def lstm_test_run():
+    dg = PredictUsingLSTM()
+    dg.download_data(data_source='yfinance')
+    dg.prepare_data()
+    dg.normalise_data()
+    dg.initialise(batch_size=5, num_unroll=5)
+    dg._test_run()
+
+
 if __name__ == "__main__":
-    std_avg_run()
+    lstm_test_run()
