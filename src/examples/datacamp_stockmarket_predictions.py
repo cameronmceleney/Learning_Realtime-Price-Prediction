@@ -60,25 +60,23 @@ __all__ = ["PredictStockMarket"]
 
 # Standard library imports
 import datetime as dt
+from dataclasses import dataclass, field
 import json
 import logging
 import os
-from functools import cached_property
 from typing import Any, Optional, Union
 import urllib.request
 
 # Third-party imports
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import NDArray, ArrayLike
+from numpy.typing import NDArray
 import pandas as pd
-# from pandas_datareader import data
 import plotly.express as px
-from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
+from tensorflow.keras import layers, models
 import yfinance as yf
-from typing_extensions import override
 
 # Local application imports
 
@@ -257,7 +255,9 @@ class PredictStockMarket:
 
         # You normalize the last bit of remaining data
         scaler.fit(self._data_train[di + smoothing_window_size:, :])
-        self._data_train[di + smoothing_window_size:, :] = scaler.transform(self._data_train[di + smoothing_window_size:, :])
+        self._data_train[di + smoothing_window_size:, :] = (
+            scaler.transform(self._data_train[di + smoothing_window_size:, :])
+        )
 
         # Reshape both train and test data
         self._data_train = self._data_train.reshape(-1)
@@ -397,7 +397,7 @@ class PredictStockMarket:
         Args:
             df: DataFrame containing the stock data.
         """
-        if df is None: df = self._dataframe
+        df = self._dataframe if df is None else df
 
         # Plot
         plt.figure(figsize=(18, 9))
@@ -453,7 +453,6 @@ class PredictStockMarket:
             plt.show()
 
         elif style == 'plotly':
-            N = self._data_all.size
 
             df_true = pd.DataFrame({
                 'Date': self._dataframe['Date'],
@@ -485,8 +484,8 @@ class PredictStockMarket:
                     'Date': "|%B %d, %Y",
                     'Price': ':.4f',
                     'Error': False,
-                    'Type': False,
-                },
+                    'Type': False
+                    },
                 color="Type",
                 color_discrete_sequence=px.colors.qualitative.Prism,
             )
@@ -574,12 +573,15 @@ class PredictStockMarket:
         )
 
 
-class PredictUsingLSTM(PredictStockMarket):
-    """A subclass of `PredictStockMarket` that uses Long Short-Term Memory (LSTM) machine learning to predict a
-    company's stock price."""
+class DataGeneratorSeq:
+    def __init__(self, batch_size: int, num_unroll: int, prices: Optional[NDArray] = None, ):
+        """Docstring.
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        Args:
+            batch_size: number of parallel sequences per batch
+            num_unroll: how many timesteps to unroll per sequence
+            prices: 1D array of training-data prices.
+        """
 
         # Training data closing prices
         self._prices: Union[None, NDArray] = None
@@ -592,17 +594,8 @@ class PredictUsingLSTM(PredictStockMarket):
         self._segments: Union[None, int] = None  # number of “segments” = floor((_prices_length)/(batch_size))
         self._cursor: Union[None, NDArray] = None  # one cursor position per batch‐slot
 
-        self._hyperparameters = {
-            'dimensionality': 1,  # Dimensionality of data; often `1` for 1D.
-            'num_unrollings': 50,  # Number of timesteps model looks into future.
-            'batch_size': 500,  # Samples per batch. Ensure no conflicts with `self._batch_size`.
-            'num_nodes': [200, 200, 150],  # Hidden nodes per layer of deep LSTM stack.
-            'n_layers': None,
-            'dropout': 0.2  # Dropout amount.
-        }
-        self._hyperparameters['n_layers'] = len(self._hyperparameters['num_nodes'])
-
-        self.train_inputs, self.train_outputs = [], []
+        # Currently initialising out with __init__ for debugging purposes.
+        self.initialise(prices=prices, batch_size=batch_size, num_unroll=num_unroll)
 
     def initialise(self, batch_size: int, num_unroll: int, prices: Optional[NDArray] = None) -> None:
         """
@@ -617,10 +610,7 @@ class PredictUsingLSTM(PredictStockMarket):
             ValueError: if prices is None (and parent’s data isn’t loaded), or if batch_size/num_unroll do not fit.
         """
         if prices is None:
-            if self._dataframe is None:
-                raise ValueError("Cannot initialise - no prices passed and parent's data (dataframe) is empty.")
-            else:
-                prices = self._data_train
+            raise ValueError("Cannot initialise - no prices passed and parent's data (dataframe) is empty.")
 
         self._prices = prices
         self._prices_length = len(prices) - num_unroll
@@ -636,27 +626,6 @@ class PredictUsingLSTM(PredictStockMarket):
             )
 
         self._cursor = [offset * self._segments for offset in range(self._batch_size)]
-
-        # Defining inputs and outputs
-        for i in range(self._hyperparameters['num_unrollings']):
-            self.train_inputs.append(tf.placeholder(tf.float32,
-                                                    shape=[self._hyperparameters['batch_size'],
-                                                           self._hyperparameters['dimensionality']],
-                                                    name=f'train_inputs_{i}'))
-            self.train_outputs.append(tf.placeholder(tf.float32,
-                                                     shape=[self._hyperparameters['batch_size'], 1],
-                                                     name=f'train_outputs_{i}'))
-
-        # Defining parameters of the LSTM and regression layer
-        lstm_cells = []
-        for L in range(self._hyperparameters['n_layers']):
-            lstm_cells.append(tf.contrib.rnn.LSTMCell(
-                num_units=self._hyperparameters['n_layers'][L],
-                state_is_tuple=True,
-                initializer=tf.contrib.layers.xavier_initializer(),
-            ))
-
-
 
     def next_batch(self) -> tuple[NDArray, ...]:
         """Return a single batch of size ``batch_size`` per cursor.
@@ -699,7 +668,6 @@ class PredictUsingLSTM(PredictStockMarket):
 
         for _ in range(self._num_unroll):
             batch_data, batch_labels = self.next_batch()
-
             unroll_data.append(batch_data)
             unroll_labels.append(batch_labels)
 
@@ -714,15 +682,257 @@ class PredictUsingLSTM(PredictStockMarket):
         for b in range(self._batch_size):
             self._cursor[b] = np.random.randint(0, min((b + 1) * self._segments, self._prices_length - 1))
 
-    def _test_run(self):
-        u_data, u_labels = self.unroll_batches()
 
-        for ui, (dat, lbl) in enumerate(zip(u_data, u_labels)):
-            print('\n\nUnrolled index %d' % ui)
-            dat_ind = dat
-            lbl_ind = lbl
-            print('\tInputs: ', dat)
-            print('\n\tOutput:', lbl)
+@dataclass
+class LSTMHyperParameters:
+    """Container for hyperparameters required to execute Long Short-Term Memory (LSTM) model.
+
+    This dataclass replaces ``self._hyperparameters: dict`` which was originally found in `PredictUsingLSTM.__init__`.
+
+    Attributes:
+        num_unrollings: Number of timesteps the model looks into the future.
+        batch_size: Samples per batch.
+        num_nodes: Hidden nodes per layer of deep LSTM stack.
+        dropout: Dropout rate between LSTM layers.
+        learning_rate: Initial learning rate.
+        min_learning_rate: Minimum learning rate.
+    """
+    dimensionality: int = 1
+    num_unrollings: int = 50
+    batch_size: int = 500
+    num_nodes: list[int] | tuple[int, ...] = (200, 200, 150)
+    dropout: float = 0.2
+    learning_rate: float = 0.0001
+    min_learning_rate: float = 0.000001
+    n_layers: int = field(init=False)
+
+    def __post_init__(self):
+        self.n_layers = len(self.num_nodes)
+
+
+class PredictUsingLSTM(PredictStockMarket):
+    """A subclass of `PredictStockMarket` that uses Long Short-Term Memory (LSTM) machine learning to predict a
+    company's stock price.
+
+    Examples:
+        >>> hparams = LSTMHyperParameters(batch_size=256)
+        >>> company = 'TSLA'
+        >>> model = PredictUsingLSTM(hparams, ticker_symbol=company)
+
+    Todo:
+        * Consider whether we could replace any code, including classes, by using `models.Sequential.fit()`.
+
+    """
+
+    def __init__(self, hyperparameters: Optional[LSTMHyperParameters] = LSTMHyperParameters(), **kwargs):
+        """Docstring.
+
+        Args:
+            hyperparameters: Dataclass to neatly gather the hyperparameters.
+            kwargs:
+                Keyword arguments passed to the parent `PredictStockMarket.__init__`.
+                Options include -``ticker_symbol``.
+        """
+        super().__init__(**kwargs)
+
+        self.hparams: LSTMHyperParameters = hyperparameters
+        self.model = self._build_model()
+
+        self.train_mse_ot, self.test_mse_ot = [], []
+        self.prediction_dates_ot, self.predictions_ot = [], []
+
+        self.loss_nondecrease_count, self.loss_nondecrease_threshold = 0, 2
+
+    def _build_model(self):
+        """Docstring."""
+
+        model = models.Sequential()
+        model.add(
+            layers.Input(shape=(self.hparams.num_unrollings, self.hparams.dimensionality))
+        )
+
+        for i, units in enumerate(self.hparams.num_nodes):
+            model.add(
+                layers.LSTM(
+                    units=units,
+                    return_sequences=(i < self.hparams.n_layers - 1),
+                    dropout=self.hparams.dropout,
+                )
+            )
+
+        model.add(layers.Dense(1))  # Final regression output
+
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.hparams.learning_rate),
+            loss='mean_squared_error',
+        )
+
+        model.summary()
+
+        return model
+
+    def _predict_autoregressively(self, start_sequence, timesteps):
+        """Make predictions autoregressively."""
+
+        input_sequence = start_sequence.copy().reshape(1, -1, 1)
+        predictions = []
+
+        for _ in range(timesteps):
+            pred = self.model.predict(input_sequence, verbose=0)[0][0]
+            predictions.append(pred)
+            new_input = np.append(input_sequence[0, 1:], [[pred]], axis=0)
+            input_sequence = new_input.reshape(1, -1, 1)
+
+        return predictions
+
+    def _make_predictions(self, data_test, epoch):
+        """Docstring."""
+
+        prediction_dates, predictions, mse_test_loss = [], [], []
+
+        for i in data_test:
+
+            # Track prediction date range for plotting
+            prediction_dates.extend(self._dataframe['Date'].iloc[i:i + self.hparams.num_unrollings])
+            # if epoch == 0:
+            #     self.x_axis_seq.append(list(range(i, i + self.hparams.num_unrollings)))
+
+            start = self._data_all[i - self.hparams.num_unrollings:i].reshape(1, -1)
+            preds = self._predict_autoregressively(start, self.hparams.num_unrollings)
+            predictions.append(preds)
+
+            true = self._data_all[i:i + self.hparams.num_unrollings]
+            mse = np.mean(0.5 * (np.array(preds) - true) ** 2)
+            mse_test_loss.append(mse)
+
+        self.predictions_ot.append(predictions)
+        self.prediction_dates_ot = np.array(prediction_dates, dtype='datetime64')
+
+        current_test_mse = np.mean(mse_test_loss)
+        self.train_mse_ot.append(current_test_mse)
+
+        # Note - here there's a `+=` operator and not an assignment `=`
+        self.loss_nondecrease_count += (
+            1
+            if len(self.test_mse_ot) > 0 and current_test_mse > min(self.test_mse_ot)
+            else 0
+        )
+
+        if self.loss_nondecrease_count > self.loss_nondecrease_threshold:
+            # 'lr' alias for 'loss rate'
+            old_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+            new_lr = max(0.5 * old_lr, self.hparams.min_learning_rate)
+
+            tf.keras.backend.set_value(self.model.optimizer.learning_rate, new_lr)
+            print(f"\t\tDecreasing learning rate to: {new_lr}")
+            self.loss_nondecrease_count = 0
+
+        print(f"\tTest Mean Squared Error: {current_test_mse:.6f}")
+        print(f"\tFinished predictions.")
+
+    @staticmethod
+    def save_predictions(predictions_: np.ndarray,
+                         prediction_dates_ : np.ndarray,
+                         filename_: str = 'lstm_predictions.csv') -> None:
+        """Save model predictions to a CSV file to avoid expensive recomputations."""
+
+        df = pd.DataFrame({
+            'Date': prediction_dates_.astype('datetime64'),
+            'Predicted': predictions_,
+        })
+
+        df.to_csv(filename_, index=False)
+        print(f"Predictions saved to: {filename_}")
+
+    @staticmethod
+    def load_predictions(filename_: str = 'lstm_predictions.csv') -> Optional[tuple[NDArray, ...]]:
+        """Load previously saved model predictions for plotting.
+
+        Note:
+             Invoking this method does not populate the class with many commonly required attributes. Therefore, this
+             method is not a viable substitute for skipping the usual startup of ``PredictStockMarket``.
+
+        Args:
+            filename_: Filename including path to load predictions from.
+
+        Returns:
+            A tuple of the loaded data if successful, else None. The contents of the tuple are as follows.
+
+                - ``Date``
+                - ``Predictions``
+        """
+        if os.path.exists(filename_):
+            print(f"Loading predictions from {filename_}")
+            df = pd.read_csv(filename_, parse_dates=['Date'])
+            return df['Date'].to_numpy(dtype='datetime64'), df.Predicted.to_numpy(dtype=float)
+        else:
+            print(f"No saved predictions found at {filename_}")
+            return None
+
+    def train_lstm_model(self, epochs: int = 30):
+        """Docstring."""
+
+        # ELSE values taken directly from tutorial.
+        test_points_seq = (
+            np.arange(11000, 12000, 50, dtype=int)
+            if self._data_test is None
+            else np.arange(self._split_point,
+                           self._split_point + self.hparams.batch_size,
+                           self.hparams.num_unrollings,
+                           dtype=int)
+        )
+
+        train_seq_len = self._data_train.size
+        steps = train_seq_len // self.hparams.batch_size  # TODO. rename variable - 'steps' offers no insight.
+        data_gen = DataGeneratorSeq(
+            prices=self._data_train,
+            batch_size=self.hparams.batch_size,
+            num_unroll=self.hparams.num_unrollings
+        )
+
+        for ep in range(epochs):
+            print(f"Epoch {ep+1}")
+            avg_loss = 0
+
+            for step in range(steps):
+                data, labels = data_gen.unroll_batches()
+
+                # Using `X` and `y` have standard ML variable meanings
+                X = np.stack(data, axis=1)[..., np.newaxis]
+                y = np.stack(labels, axis=1)[..., np.newaxis]
+
+                X = X[:, :, 0]
+                y = y[:, -1, 0].reshape(-1, 1)
+
+                loss = self.model.train_on_batch(X, y)
+                avg_loss += loss
+
+            avg_loss /= steps
+            self.train_mse_ot.append(avg_loss)
+            print(f"Average training loss: {avg_loss: .6f}")
+
+            self._make_predictions(data_test=test_points_seq, epoch=ep)
+
+    def visualise_lstm_based_predictions(self,
+                                         predictions: np.ndarray,
+                                         prediction_dates: np.ndarray,
+                                         style: str = 'mpl'):
+        """Docstring."""
+
+        if style == 'mpl':
+            fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+
+            ax.plot(range(self._data_all.size), self._data_all, color='blue', label='Source')
+            ax.plot(prediction_dates, predictions, color='orange', label='Predicted')
+
+            ax.set(
+                title=f"Stock Market Predictions | {self.ticker_symbol} | LSTM",
+                xlabel="Date",
+                ylabel="Mid. Price",
+            )
+
+            ax.legend(title="Price data")
+            plt.show()
 
 
 def initial_run() -> None:
@@ -745,9 +955,67 @@ def lstm_test_run():
     dg.download_data(data_source='yfinance')
     dg.prepare_data()
     dg.normalise_data()
-    dg.initialise(batch_size=5, num_unroll=5)
-    dg._test_run()
+
+    dg.train_lstm_model(epochs=2)
+
+    # Plotting predictions across all epochs
+    all_mid_data = dg._data_all
+    predictions_over_time = dg.predictions_ot
+    x_axis_seq = [
+        list(range(i, i + dg.hparams.num_unrollings))
+        for i in np.arange(
+            dg._split_point,
+            dg._split_point + dg.hparams.batch_size,
+            dg.hparams.num_unrollings,
+            dtype=int
+        )
+    ]
+
+    best_prediction_epoch = 1  # manually selected for now
+
+    plt.figure(figsize=(18, 18))
+    plt.subplot(2, 1, 1)
+    plt.plot(range(len(all_mid_data)), all_mid_data, color='b')
+
+    start_alpha = 0.25
+    step_alpha = (1.0 - start_alpha) / len(predictions_over_time[::1])
+    alpha = np.arange(start_alpha, 1.01, step_alpha)
+
+    for p_i, p in enumerate(predictions_over_time[::1]):
+        for xval, yval in zip(x_axis_seq, p):
+            plt.plot(xval, yval, color='r', alpha=alpha[p_i])
+
+    plt.title('Evolution of Test Predictions Over Time', fontsize=18)
+    plt.xlabel('Date', fontsize=18)
+    plt.ylabel('Mid Price', fontsize=18)
+
+    plt.subplot(2, 1, 2)
+    plt.plot(range(len(all_mid_data)), all_mid_data, color='b')
+
+    for xval, yval in zip(x_axis_seq, predictions_over_time[best_prediction_epoch]):
+        plt.plot(xval, yval, color='r')
+
+    plt.title('Best Test Predictions Over Time', fontsize=18)
+    plt.xlabel('Date', fontsize=18)
+    plt.ylabel('Mid Price', fontsize=18)
+    plt.show()
+
+    # dg.save_predictions(
+    #     predictions_=flat_predictions,
+    #     prediction_dates_=prediction_dates,
+    # )
+    # dg.visualise_lstm_based_predictions(
+    #     predictions=flat_predictions,
+    #     prediction_dates=prediction_dates,
+    #     style='mpl',
+    # )
 
 
 if __name__ == "__main__":
+    # dg = PredictUsingLSTM()
+    # predictions, dates = dg.load_predictions()
+    # dg.visualise_lstm_based_predictions(
+    #     predictions=predictions.reshape(-1),
+    #     prediction_dates=dates.reshape(-1),
+    # )
     lstm_test_run()
